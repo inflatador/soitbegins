@@ -17,7 +17,7 @@ import re
 import requests
 import sys
 import time
-from time import time
+# from time import time
 
 def find_endpoints(auth_token, region, desired_service="cloudImages"):
 
@@ -105,7 +105,9 @@ def check_for_cf_object(files_endpoint, headers, cf_container, cf_object, region
     object_check = requests.head(url=object_url, headers=headers)
 
     if object_check.status_code == 404:
-        print ("Error! Couldn't find object %s in container %s in region %s." % (cf_object, cf_container, region))
+        print ("Error! I checked region %s, but couldn't find object %s in container %s." % (region, cf_object, cf_container))
+    else:
+        print ("I found object %s in container %s in the %s region." % (cf_object, cf_container, region))
 
     return object_url
 
@@ -124,11 +126,66 @@ def import_image(images_endpoint, headers, cf_container, cf_object):
     raw_import_task.raise_for_status()
     import_task = raw_import_task.json()
     import_task_id = import_task["id"]
+    print ("Spawned import task for image %s . Import task ID is %s" % (cf_object, import_task_id))
     return import_task_id
 
 def check_import_status(images_endpoint, headers, import_task_id):
     import_task_url = ("%s/tasks/%s" % (images_endpoint, import_task_id))
-    print (import_task_url)
+    import_status = ""
+    while import_status != "success":
+        try:
+            import_status_check = requests.get(url=import_task_url, headers=headers)
+        except requests.ConnectionError as e:
+            print("Can't connect to API, trying again...")
+        if import_status_check.status_code == 200:
+            import_status = import_status_check.json()["status"]
+            import_message = import_status_check.json()["message"]
+        if import_status == "failed":
+            print ('''
+            Error! Image import failed with message %s.
+            See https://developer.rackspace.com/docs/cloud-images/v2/api-reference/image-task-operations/
+            for error codes." % (import_message)
+            ''')
+        import_status_output = "Image import is in '%s' status..." % (import_status)
+        sys.stdout.write(import_status_output)
+        sys.stdout.flush()
+
+        if import_status == "processing":
+            import_status_postpend = "checking again in 30 seconds..."
+            sys.stdout.write(import_status_postpend)
+            sys.stdout.flush()
+            time.sleep(30)
+    #After the task succeeds, we can get the image ID
+    image_id_check = requests.get(url=import_task_url, headers=headers)
+    image_id = image_id_check.json()["result"]["image_id"]
+    print ("New image imported successfully! Image ID is %s" % (image_id))
+    return image_id
+
+def set_image_metadata(cs_endpoint, headers, image_id):
+    # check to see if the image is there.
+    image_url = ("%s/images/%s" % (cs_endpoint, image_id))
+    # image_url = "https://iad.servers.api.rackspacecloud.com/v2/766030/images/8c157ae6-5b56-4739-8cba-f3831f3dbe2e"
+    # print (image_url)
+    image_exists_check = requests.get(url=image_url, headers=headers)
+    image_exists_check.raise_for_status()
+    metadata_url = ("%s/images/%s/metadata" % (cs_endpoint, image_id))
+    # The following image metadata key/value pairs are needed for
+    # maximum importability into Rackspace Public Cloud
+    needed_metadata = {
+        "metadata": {
+            "vm_mode": "hvm",
+            "xenapi_use_agent": "False",
+            "img_config_drive": "mandatory",
+            "com.rackspace__1__resize_disk": False,
+            "ssh_user": "admin"
+                    }
+                        }
+    metadata_addition = requests.post(url=metadata_url, headers=headers, json=needed_metadata)
+    metadata_addition.raise_for_status()
+    print ("Success! I set the values %s on newly-imported image %s." % (needed_metadata, image_id))
+
+
+
 
 #begin main function
 @plac.annotations(
@@ -141,17 +198,22 @@ def main(region, cf_container, cf_object):
 
     auth_token = get_auth_token(username, password)
 
+    #FIXME: This violates DRY
+
     images_endpoint, headers = find_endpoints(auth_token, region, desired_service="cloudImages")
 
-    files_endpoint, headers  = find_endpoints(auth_token, region, desired_service="cloudFiles")
+    files_endpoint, headers = find_endpoints(auth_token, region, desired_service="cloudFiles")
 
+    cs_endpoint, headers = find_endpoints(auth_token, region, desired_service="cloudServersOpenStack")
+
+    #Not using the object URL at the moment, but could use this to delete the object after import.
     object_url = check_for_cf_object(files_endpoint, headers, cf_container, cf_object, region)
 
     import_task_id = import_image(images_endpoint, headers, cf_container, cf_object)
 
-    check_import_status(images_endpoint, headers, import_task_id)
+    image_id = check_import_status(images_endpoint, headers, import_task_id)
 
-    #this might violate DRY, I will fix later.
+    set_image_metadata(cs_endpoint, headers, image_id)
 
 
 
