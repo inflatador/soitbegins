@@ -164,8 +164,6 @@ def check_import_status(images_endpoint, headers, import_task_id):
 def set_image_metadata(cs_endpoint, headers, image_id):
     # check to see if the image is there.
     image_url = ("%s/images/%s" % (cs_endpoint, image_id))
-    # image_url = "https://iad.servers.api.rackspacecloud.com/v2/766030/images/8c157ae6-5b56-4739-8cba-f3831f3dbe2e"
-    # print (image_url)
     image_exists_check = requests.get(url=image_url, headers=headers)
     image_exists_check.raise_for_status()
     metadata_url = ("%s/images/%s/metadata" % (cs_endpoint, image_id))
