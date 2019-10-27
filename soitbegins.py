@@ -19,21 +19,21 @@ import sys
 import time
 # from time import time
 
-def find_endpoints(auth_token, region, desired_service="cloudImages"):
+def find_endpoints(auth_token, headers, region, desired_service="cloudServersOpenStack"):
 
     url = ("https://identity.api.rackspacecloud.com/v2.0/tokens/%s/endpoints" % auth_token)
-    headers = {'content-type': 'application/json', 'Accept': 'application/json',
-               'X-Auth-Token': auth_token}
     #region is always uppercase in the service catalog
     region = region.upper()
     raw_service_catalog = requests.get(url, headers=headers)
     raw_service_catalog.raise_for_status()
     the_service_catalog = raw_service_catalog.json()
     endpoints = the_service_catalog["endpoints"]
-    for service in range(len(endpoints)):
-        if desired_service == endpoints[service]["name"] and region == endpoints[service]["region"]:
-            desired_endpoint = endpoints[service]["publicURL"]
-    return desired_endpoint, headers
+
+    for service in endpoints:
+        if desired_service == service["name"] and region == service["region"]:
+            desired_endpoint = service["publicURL"]
+
+    return desired_endpoint
 
 def getset_keyring_credentials(username=None, password=None):
     """Method to retrieve credentials from keyring."""
@@ -98,7 +98,11 @@ def get_auth_token(username,password):
     data = r.json()
     #assign token and account variables with info from json response.
     auth_token = data["access"]["token"]["id"]
-    return auth_token
+
+    headers = ({'content-type': 'application/json', 'Accept': 'application/json',
+    'X-Auth-Token': auth_token})
+
+    return auth_token, headers
 
 def check_for_cf_object(files_endpoint, headers, cf_container, cf_object, region):
     object_url = ("%s/%s/%s" % (files_endpoint, cf_container, cf_object))
@@ -171,11 +175,7 @@ def set_image_metadata(cs_endpoint, headers, image_id):
     # maximum importability into Rackspace Public Cloud
     needed_metadata = {
         "metadata": {
-            "vm_mode": "hvm",
-            "xenapi_use_agent": "False",
-            "img_config_drive": "mandatory",
-            "com.rackspace__1__resize_disk": False,
-            "ssh_user": "admin"
+            "vm_mode": "hvm"
                     }
                         }
     metadata_addition = requests.post(url=metadata_url, headers=headers, json=needed_metadata)
@@ -194,15 +194,15 @@ def set_image_metadata(cs_endpoint, headers, image_id):
 def main(region, cf_container, cf_object):
     username,password = getset_keyring_credentials()
 
-    auth_token = get_auth_token(username, password)
+    auth_token, headers = get_auth_token(username, password)
 
     #FIXME: This violates DRY
 
-    images_endpoint, headers = find_endpoints(auth_token, region, desired_service="cloudImages")
+    images_endpoint = find_endpoints(auth_token, headers, region, desired_service="cloudImages")
 
-    files_endpoint, headers = find_endpoints(auth_token, region, desired_service="cloudFiles")
+    files_endpoint = find_endpoints(auth_token, headers, region, desired_service="cloudFiles")
 
-    cs_endpoint, headers = find_endpoints(auth_token, region, desired_service="cloudServersOpenStack")
+    cs_endpoint = find_endpoints(auth_token, headers, region, desired_service="cloudServersOpenStack")
 
     #Not using the object URL at the moment, but could use this to delete the object after import.
     object_url = check_for_cf_object(files_endpoint, headers, cf_container, cf_object, region)
