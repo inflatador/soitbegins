@@ -175,7 +175,8 @@ def set_image_metadata(cs_endpoint, headers, image_id):
     # maximum importability into Rackspace Public Cloud
     needed_metadata = {
         "metadata": {
-            "vm_mode": "hvm"
+            "vm_mode": "hvm",
+            "img_config_drive": "mandatory"
                     }
                         }
     metadata_addition = requests.post(url=metadata_url, headers=headers, json=needed_metadata)
